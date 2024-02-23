@@ -36,7 +36,7 @@
 
 * Why Modules
 
-Abstract: C++ Named Modules are not about build optimization, although that was an important design consideration. Modules are about controlling visibility and access to names and definitions at a  grained level.
+Abstract: C++ Named Modules are not about build optimization, although that was an important design consideration. Modules are about controlling visibility and access to names and definitions at a fine-grained level.
 
 This talk will show how to use the various features of modules and the kinds of module units to provide access to the features of your library while hiding the details you don't want clients to depend on. The talk will also cover some of the limitations and how clients may still end up depending on your details in ways that constrain your ability to maintain ABI compatibility.
 
@@ -52,11 +52,11 @@ Topics and Preliminary Outline
 ** Reachability
 
 * Organizing your Module
-** Cycles Forbidden
+** Dependency Cycles Are Forbidden
 ** Single File Unit
 ** Module Partitions
 ** Implementation Partitions
-** `export import` sub modules
+** `export import` : sub-modules
 
 * Planning ahead
 ** Do you care about ABI or API?
