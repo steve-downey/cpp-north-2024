@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 
-set(CMAKE_C_COMPILER clang-18)
-set(CMAKE_CXX_COMPILER clang++-18)
+set(CMAKE_C_COMPILER clang-19)
+set(CMAKE_CXX_COMPILER clang++-19)
 
 set(CMAKE_CXX_STANDARD 20)
 
