@@ -49,14 +49,23 @@
 #+REVEAL_EXPORT_NOTES_TO_PDF: separate-page
 #+REVEAL_DEFAULT_FRAG_STYLE: (appear)
 
-* Why Modules
+* Why Modules?
+It's not about build time.
+
 ** Abstract
-Abstract: C++ Named Modules are not about build optimization, although that was an important design consideration. Modules are about controlling visibility and access to names and definitions at a fine-grained level.
+Abstract: C++ Named Modules are not about build optimization, although that was an important design consideration.
+
+Modules are about controlling visibility and access to names and definitions at a fine-grained level.
 ** What we're going to talk about
-This talk will show how to use the various features of modules and the kinds of module units to provide access to the features of your library while hiding the details you don't want clients to depend on. The talk will also cover some of the limitations and how clients may still end up depending on your details in ways that constrain your ability to maintain ABI compatibility.
+I will show how to use the various features of modules and the kinds of module units to provide access to the features of your library while hiding the details you don't want clients to depend on.
+
+I will also cover some of the limitations and how clients may still end up depending on your details in ways that constrain your ability to maintain ABI compatibility.
 
 * The Problem
 ~#include~ is awful.
+
+MACROS are worse.
+
 ** Problem Statement
 #+begin_quote
 The lack of direct language support for componentization of C++ libraries and
@@ -71,6 +80,8 @@ environments.
 A Module System for C++ (Revision 4)
 
 Gabriel Dos Reis Mark Hall Gor Nishanov
+
+2016-02-15
 
 [[https://wg21.link/p0142]]
 
@@ -109,7 +120,7 @@ A /module unit/ that begins with ~export~
 The interface is what other translation units can see.
 
 *** Module Implementation Unit
-Any module unit that isn't an interface unit.
+Any /module unit/ that isn't an interface unit.
 
 *** Module Partition
 A /module unit/ that has a /module partition/ in its declation.
