@@ -50,39 +50,314 @@
 #+REVEAL_DEFAULT_FRAG_STYLE: (appear)
 
 * Why Modules
-
+** Abstract
 Abstract: C++ Named Modules are not about build optimization, although that was an important design consideration. Modules are about controlling visibility and access to names and definitions at a fine-grained level.
-
+** What we're going to talk about
 This talk will show how to use the various features of modules and the kinds of module units to provide access to the features of your library while hiding the details you don't want clients to depend on. The talk will also cover some of the limitations and how clients may still end up depending on your details in ways that constrain your ability to maintain ABI compatibility.
 
-Topics and Preliminary Outline
+* The Problem
+~#include~ is awful.
+** Problem Statement
+#+begin_quote
+The lack of direct language support for componentization of C++ libraries and
+programs, combined with increasing use of templates, has led to serious
+impediments to compile-time scalability, and programmer productivity. It is the
+source of lackluster build performance and poor integration with cloud and
+distributed build systems. Furthermore, the heavy-reliance on header file
+inclusion (i.e. copy-and-paste from compilers perspective) and macros stifle
+flowering of C++ developer tools in increasingly semantics-aware development
+environments.
+#+end_quote
+A Module System for C++ (Revision 4)
+
+Gabriel Dos Reis Mark Hall Gor Nishanov
+
+[[https://wg21.link/p0142]]
+
+** The Goals
+1. componentization;
+2. isolation from macros;
+3. scalable build;
+4. support for modern semantics-aware developer tools.
+
+Furthermore, the proposal reduces opportunities for violations of the One Definition Rule (ODR), and increases practical type-safe linking.
+
+[[https://wg21.link/p0142]]
+
+** We Want What Modern Languages Have
+- Don't Repeat Yourself
+- Increase Cohesion
+- Decrease Coupling
+
+
 * Module Syntax and Semantics
 ** Module units
+All the parts of modules are distinct translation units.
+
+They are compiled separately.
+- Module Unit
+- Module Interface Unit
+- Module Implementation Unit
+- Module Partition
+- Primary Module Interface Unit
+*** Module Unit
+A translation unit that has a module declaration.
+
+*** Module Interface Unit
+A /module unit/ that begins with ~export~
+
+The interface is what other translation units can see.
+
+*** Module Implementation Unit
+Any module unit that isn't an interface unit.
+
+*** Module Partition
+A /module unit/ that has a /module partition/ in its declation.
+
+A /module partition/ can only be imported within the module.
+
+*** Primary Module Interface Unit
+The one /module unit/ for a module that exports everything visible in the interface.
+
+*** Example
+
+Primary Interface Unit
+#+begin_src C++
+export module A;
+export import :Foo;
+export int baz();
+#+end_src
+
+Module partition A:Foo which is an interface unit
+#+begin_src C++
+export module A:Foo;
+import :Internals;
+export int foo() { return 2 * (bar() + 1); }
+#+end_src
+
+Module partition A:Internals which is not part of the interface of A
+#+begin_src C++
+module A:Internals;
+int bar();
+#+end_src
+
+Module implementation unit
+#+begin_src C++
+module A;
+import :Internals;
+int bar() { return baz() - 10; }
+int baz() { return 30; }
+#+end_src
+
 ** Module "Purviews"
+Everything from the /module declaration/ to the end of the translation unit.
+
+The text before the /module declaration/ is not within the purview of the module.
+
 ** Export
+Export is how we make declarations, names and definitions, available to be imported by translation units not in the module.
+
+- ~export~ must be in the /purview/ of a module
+- You can't ~export~ things with internal linkage
+
+*** Works
+#+begin_src C++
+export int f();                 // OK
+export namespace N { }          // OK
+export using namespace N;       // OK
+
+struct S;
+export using T = S;             // OK, exports name T denoting type S
+#+end_src
+
+*** Does Not Work
+#+begin_src c++
+export namespace {}             // error: namespace has internal linkage
+namespace {
+  export int a2;                // error: export of name with internal linkage
+}
+export static int b;            // error: b explicitly declared static
+#+end_src
+
+*** Surprising Things That Work
+#+begin_src C++
+namespace {
+  struct S { };
+}
+export void f(S);               // OK
+struct T { };
+export T id(T);                 // OK
+#+end_src
+This means if you can produce an S or a T, you can call the function. You can't name them or construct them yourself.
+
+
 ** Import
+Import is how a translation unit gets access to the declarations a module exports.
+
+Only ~import~ a module interface that was  ~export~ -ed.
+
+
 ** Global Module Fragment
+Between  ~module;~ and the module declaration.
+
+Can only have preprocessor directives.
+
+Not attached to the module, but may be reachable if used.
+
+#+begin_src C++
+module;
+#include "foo.h"
+export module M;
+#+end_src
 ** Private Module Fragment
-** Instantiation Context
+To support single translation unit modules, the /private module fragment/ is unable to affect other translation units.
+
+It can provide definitions of things used within a module.
+#+begin_src C++
+static void fn_s();
+export struct X;
+export void g(X *x) {
+  fn_s();                       // OK, call to static function in same translation unit
+}
+export X *factory();            // OK
+
+module :private;
+struct X {};                    // definition not reachable from importers of A
+X *factory() {
+  return new X ();
+}
+#+end_src
+
 ** Reachability
+You can only use declarations that are /reachable/.
+A declaration is /reachable/ at a point if:
+- It appears before the point in the same translation unit
+- It is in a reachable translation unit and is not in the PMF.
+
+A translation unit is reachable from a point if there is an interface dependency on it or a transitive dependency.
+
+You might not be able to use the name, but the type is usable by the compiler.
+*** Examples
+Module Interface Partition
+#+begin_src c++
+export module M:A;
+export struct B;
+#+end_src
+
+Module Implementation Partition
+#+begin_src C++
+module M:B;
+struct B {
+  operator int();
+};
+#+end_src
+
+Module Implementation Partition
+#+begin_src C++
+module M:C;
+import :A;
+B b1;                           // error: no reachable definition of struct B
+#+end_src
+
+Primary Module Interface
+#+begin_src C++
+export module M;
+export import :A;
+import :B;
+B b2;
+export void f(B b = B());
+#+end_src
+
+Plain Old Source
+#+begin_src C++
+import M;
+B b3;                           // error: no reachable definition of struct B
+void g() { f(); }               // error: no reachable definition of struct B
+#+end_src
 
 * Organizing your Module
 ** Dependency Cycles Are Forbidden
+This is explicit, but also how else would it work?
+
+Bloomberg Component rules (a.k.a. Lakosian rules) give us this already
+*** Forward Declaration
+You can't forward declare a type in a different module.
+
+Cycle breaking must be within modules.
+
+
 ** Single File Unit
+There is some support for the equivalent of a header only library.
+
+It may still need to produced an object file that you link.
+
+Your project may need to build it.
+
+
 ** Module Partitions
+
+Partitions must be acyclic,too.
+
+Useful for separating parts of a library internally.
+
 ** Implementation Partitions
+Very much like normal source files for a library.
+
+Can not contribute to interface.
+
+Have access to all declarations from the primary module interface.
+
 ** ~export import~ : sub-modules
+You can rexport an entire module from your module.
+
+Units that ~import~ your module have access just as if they had themselves.
+
+Can partially hide internal structure.
 
 * Planning ahead
 ** Do you care about ABI or API?
-** What do you want to hide
-** ~inline~ means inline
-** Module Attachment and Mangling
+ABI stability means some reorganizations will change ABI. You can move between partitions, but not modules.
 
+Module attachment is not visible in the API.
+
+Bloomberg cares about API. We always rebuild the world.
+
+** ~inline~ means inline
+The ~inline~ keyword finally means something about inlining. Functions must be marked ~inline~ to have their bodies exported, although this is more complicated for template instantiations in importers.
+
+** Module Attachment and Mangling
+#+begin_src C++
+module A:B;
+
+export struct foo {
+    int i_;
+    foo(int i) : i_(i) {
+    }
+};
+#+end_src
+
+#+begin_src asm
+foo@A::foo(int) [base object constructor]:                         # @foo@A::foo(int) [base object constructor]
+        mov     dword ptr [rdi], esi
+        ret
+initializer for module A:B:                            # @initializer for module A:B
+        ret
+#+end_src
 * Testing Modules
 ** Public Interface
+If you can test via the public interface, that is the most straightforward, and will probably make your clients the most happy.
 ** Test Implementation Units
+It is possible to write implementation units that have access to the internals of a module and write tests there to link into your test driver.
 
+Module implementations are not closed, similar to namespace.
+
+It is not a security feature. But they can't change your interface.
+
+* Thank You!
+
+* Questions?
+
+* Thanks again!
 # Local Variables:
-# org-html-htmlize-output-type: inline-css
+# org-html-htmlize-output-type: css
 # End:
