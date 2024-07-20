@@ -1,7 +1,7 @@
-#+OPTIONS: ':nil *:t -:t ::t <:t H:3 \n:nil ^:t arch:headline author:t
-#+OPTIONS: broken-links:nil c:nil creator:nil d:(not "LOGBOOK") date:t e:t
-#+OPTIONS: email:nil f:t inline:t num:t p:nil pri:nil prop:nil stat:t tags:t
-#+OPTIONS: tasks:t tex:t timestamp:t title:t toc:nil todo:t |:t
+#+OPTIONS: ':nil *:t -:t ::t <:t H:nil \n:nil ^:nil arch:headline author:nil
+#+OPTIONS: broken-links:nil c:nil creator:nil d:(not "LOGBOOK") date:nil e:t
+#+OPTIONS: email:nil f:t inline:t num:nil p:nil pri:nil prop:nil stat:t tags:t
+#+OPTIONS: tasks:t tex:t timestamp:nil title:t toc:nil todo:t |:t
 #+TITLE: Why Modules?
 #+SUBTITLE: It's not about build time.
 #+DATE: <2024-02-01 Thu>
@@ -10,7 +10,7 @@
 #+LANGUAGE: en
 #+SELECT_TAGS: export
 #+EXCLUDE_TAGS: noexport
-#+LATEX_CLASS: report
+#+LATEX_CLASS: article
 #+LATEX_CLASS_OPTIONS:
 #+LATEX_HEADER:
 #+LATEX_HEADER_EXTRA:
@@ -18,7 +18,9 @@
 #+KEYWORDS:
 #+SUBTITLE:
 #+LATEX_COMPILER: pdflatex
-#+OPTIONS: html-link-use-abs-url:nil html-postamble:nil html-preamble:t
+#+DATE:
+#+STARTUP: showall
+#+OPTIONS: html-link-use-abs-url:nil html-postamble:nil html-preamble:tbla
 #+OPTIONS: html-scripts:t html-style:t html5-fancy:nil tex:t
 #+HTML_DOCTYPE: xhtml-strict
 #+HTML_CONTAINER: div
@@ -27,47 +29,485 @@
 #+HTML_LINK_HOME:
 #+HTML_LINK_UP:
 #+HTML_MATHJAX:
-#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="https://raw.githubusercontent.com/steve-downey/css/master/smd-zenburn.css" />
+#+HTML_HEAD:
 #+HTML_HEAD_EXTRA:
+#+SUBTITLE:
 #+INFOJS_OPT:
-#+CREATOR:
-#+LATEX_HEADER:
-#+STARTUP: showeverything
+#+OPTIONS: reveal_width:1600 reveal_height:900
+#+REVEAL_TRANS: fade
+#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="./operandi-tinted.css" />
 
-* Why Modules
+#+REVEAL_MATHJAX_URL: https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML
+#+REVEAL_EXTRA_CSS: ./operandi-tinted.css
+#+REVEAL_THEME: ./my_theme.css
+#+REVEAL_EXTRA_CSS: ./footer.css
 
-Abstract: C++ Named Modules are not about build optimization, although that was an important design consideration. Modules are about controlling visibility and access to names and definitions at a fine-grained level.
+# #+REVEAL_ROOT: https://cdn.jsdelivr.net/npm/reveal.js
+#+REVEAL_ROOT: /home/sdowney/bld/revealjs/reveal.js-master
 
-This talk will show how to use the various features of modules and the kinds of module units to provide access to the features of your library while hiding the details you don't want clients to depend on. The talk will also cover some of the limitations and how clients may still end up depending on your details in ways that constrain your ability to maintain ABI compatibility.
+#+REVEAL_VERSION: 4
 
-Topics and Preliminary Outline
+#+REVEAL_HLEVEL: 2
+#+REVEAL_EXPORT_NOTES_TO_PDF: separate-page
+#+REVEAL_DEFAULT_FRAG_STYLE: (appear)
+
+#+OPTIONS: reveal_single_file:t reveal_embed_local_resources: t
+#+OPTIONS: reveal_slide_number:c/t
+
+#+REVEAL_TITLE_SLIDE:
+
+* Why Modules?
+It's not about build time.
+
+** What are Modules for?
+Modules are about controlling visibility and access to names and definitions.
+
+Supporting "large-scale" software development.
+
+** What we're going to talk about
+I will show how to use various features of Modules and the kinds of module units to use to provide access to the features of your library, while hiding the details you don't want clients to depend on.
+
+I will also cover some of the limitations and how clients may still end up depending on your details in ways that constrain your ability to maintain ABI compatibility.
+
+* The Problem
+~#include~ is awful.
+
+MACROS are worse.
+** Hyrum's Law
+#+begin_verse
+With a sufficient number of users of an API,
+it does not matter what you promise in the contract:
+all observable behaviors of your system
+will be depended on by somebody.
+#+end_verse
+
+  Hyrum Wright
+
+  https://www.hyrumslaw.com/
+
+*** Obligatory XKCD
+#+CAPTION:  Workflow: https://xkcd.com/1172/
+#+NAME: Workflow
+[[./workflow_2x.png]]
+
+** Breaking the Build
+*** Today is a bad day
+#+begin_src c++
+struct Days {
+    inline static constexpr int Sunday    = 0;
+    inline static constexpr int Monday    = 1;
+    inline static constexpr int Tuesday   = 2;
+    inline static constexpr int Wednesday = 3;
+    inline static constexpr int Thursday  = 4;
+    inline static constexpr int Friday    = 5;
+    inline static constexpr int Saturday  = 6;
+
+};
+#+end_src
+#+begin_example
+example.cpp
+<source>(7): error C2061: syntax error: identifier 'TUESDAY'
+<source>(7): error C2258: illegal pure syntax, must be '= 0'
+<source>(7): error C2253: 'Days::lookup_day': pure specifier or abstract override specifier only
+                          allowed on virtual function
+Compiler returned: 2
+#+end_example
+**** Elsewhere
+#+begin_src c++
+const int TUESDAY = 2;
+#define Tuesday lookup_day(TUESDAY)
+#+end_src
+*** How did I break the build?
+#+begin_src diff
+--- a/dict.hpp	2024-07-08 11:26:20.346434057 -0400
++++ b/dict.hpp	2024-07-08 11:25:56.461562259 -0400
+@@ -2,13 +2,13 @@
+ #ifndef INCLUDED_MAP_EXAMPLE
+ #define INCLUDED_MAP_EXAMPLE
+
+-#include <map>
++#include <unordered_map>
+
+ namespace example {
+
+ class mine {
+   private:
+-    std::map<std::string, int> map_;
++    std::unordered_map<std::string, int> map_;
+
+   public:
+     /// More stuff
+
+#+end_src
+**** Elsewhere
+#+begin_src C++
+/// snip
+#include <dict.hpp>
+
+/// snip
+
+std::map<std::string, int>::iterator lookupThing(std::string const& key);
+#+end_src
+*** Why?
+#+begin_src diff
+--- a/detail/view.hpp	2024-07-08 11:42:52.542003117 -0400
++++ b/detail/view.hpp	2024-07-08 11:42:35.534632242 -0400
+@@ -2,11 +2,12 @@
+ #ifndef INCLUDED_DETAIL_VIEW
+ #define INCLUDED_DETAIL_VIEW
+
++#include <cstddef>
+ namespace detail {
+
+ struct view {
+     char* begin_;
+-    char* end_;
++    std::ptrdiff_t distance_;
+ };
+
+ } // namespace detail
+
+#+end_src
+**** Elsewhere - in client code
+#+begin_src C++
+std::cout << "begin:" << (void*)v.begin_
+          << "\tend:" << (void*)v.end_ << '\n';
+#+end_src
+*** Accidental Complexity
+Our code is coupled because of accidental information leakage.
+
+Well-intentioned programmers trying to get their jobs done will use whatever is available to them.
+
+Some days, /you/ are that programmer.
+
+*** This is the problem Modules tries to solve
+
+*** What if it could also make building faster?
+
+** Problem Statement
+#+begin_quote
+The lack of direct language support for componentization of C++ libraries and
+programs, combined with increasing use of templates, has led to serious
+impediments to compile-time scalability, and programmer productivity. It is the
+source of lackluster build performance and poor integration with cloud and
+distributed build systems. Furthermore, the heavy-reliance on header file
+inclusion (i.e., copy-and-paste from compilers perspective) and macros stifle
+flowering of C++ developer tools in increasingly semantics-aware development
+environments.
+#+end_quote
+A Module System for C++ (Revision 4)
+
+Gabriel Dos Reis Mark Hall Gor Nishanov
+
+2016-02-15
+
+[[https://wg21.link/p0142]]
+
+** The Goals
+#+begin_quote
+1. componentization;
+2. isolation from macros;
+3. scalable build;
+4. support for modern semantics-aware developer tools.
+
+Furthermore, the proposal reduces opportunities for violations of the One Definition Rule (ODR) and increases practical type-safe linking.
+#+end_quote
+
+[[https://wg21.link/p0142]]
+
+** We Want What Modern Languages Have
+- Don't Repeat Yourself
+- Increase Cohesion
+- Decrease Coupling
+
+
 * Module Syntax and Semantics
 ** Module units
+All parts of modules are distinct translation units.
+
+They are compiled separately.
+- Module Unit
+- Module Interface Unit
+- Module Implementation Unit
+- Module Partition
+- Primary Module Interface Unit
+*** Module Unit
+A translation unit that has a module declaration.
+
+*** Module Interface Unit
+A /module unit/ that begins with ~export~
+
+The interface is what other translation units can see.
+
+*** Module Implementation Unit
+Any /module unit/ that isn't an interface unit.
+
+*** Module Partition
+A /module unit/ that has a /module partition/ in its declaration.
+
+A /module partition/ can only be imported within the module.
+
+*** Primary Module Interface Unit
+The one /module unit/ for a module that exports everything visible in the interface.
+
+*** Example
+
+Primary Interface Unit
+#+begin_src C++
+export module A;
+export import :Foo;
+export int baz();
+#+end_src
+
+Module partition A:Foo which is an interface unit
+#+begin_src C++
+export module A:Foo;
+import :Internals;
+export int foo() { return 2 * (bar() + 1); }
+#+end_src
+
+Module partition A:Internals which is not part of the interface of A
+#+begin_src C++
+module A:Internals;
+int bar();
+#+end_src
+
+Module implementation unit
+#+begin_src C++
+module A;
+import :Internals;
+int bar() { return baz() - 10; }
+int baz() { return 30; }
+#+end_src
+
 ** Module "Purviews"
+Everything from the /module declaration/ to the end of the translation unit.
+
+The text before the /module declaration/ is not within the purview of the module.
+
 ** Export
+Export is how we make declarations, names and definitions, available to be imported by translation units not in the module.
+
+- ~export~ must be in the /purview/ of a module
+- You can't ~export~ things with internal linkage
+
+*** Works
+#+begin_src C++
+export int f();                 // OK
+export namespace N { }          // OK
+export using namespace N;       // OK
+
+struct S;
+export using T = S;             // OK, exports name T denoting type S
+#+end_src
+
+*** Does Not Work
+#+begin_src c++
+export namespace {}             // error: namespace has internal linkage
+namespace {
+  export int a2;                // error: export of name with internal linkage
+}
+export static int b;            // error: b explicitly declared static
+#+end_src
+
+*** Surprising Things That Work
+#+begin_src C++
+namespace {
+  struct S { };
+}
+export void f(S);               // OK
+struct T { };
+export T id(T);                 // OK
+#+end_src
+This means if you can produce an object of type S or T, you can call the function.
+
+You can't name them or construct them yourself.
+
+
 ** Import
+Import is how a translation unit gets access to the declarations that a module exports.
+
+Only ~import~ a module interface that was  ~export~ -ed.
+
+
 ** Global Module Fragment
+Between ~module;~ and the module declaration.
+
+Can only have preprocessor directives.
+
+Not attached to the module, but may be reachable if used.
+
+#+begin_src C++
+module;
+#include "foo.h"
+export module M;
+#+end_src
 ** Private Module Fragment
-** Instantiation Context
+To support single translation unit modules, the /private module fragment/ is unable to affect other translation units.
+
+It can provide definitions of things used within a module.
+#+begin_src C++
+static void fn_s();
+export struct X;
+export void g(X *x) {
+  fn_s();                       // OK, call to static function in same translation unit
+}
+export X *factory();            // OK
+
+module :private;
+struct X {};                    // definition not reachable from importers of A
+X *factory() {
+  return new X ();
+}
+#+end_src
+
 ** Reachability
+You can only use declarations that are /reachable/.
+A declaration is /reachable/ at a point if:
+- It appears before the point in the same translation unit
+- It is in a reachable translation unit and is not in the PMF.
+
+A translation unit is reachable from a point if there is an interface dependency on it or a transitive dependency.
+
+You might not be able to use the name, but the type is usable by the compiler.
+*** Examples
+Module Interface Partition
+#+begin_src c++
+export module M:A;
+export struct B;
+#+end_src
+
+Module Implementation Partition
+#+begin_src C++
+module M:B;
+struct B {
+  operator int();
+};
+#+end_src
+
+Module Implementation Partition
+#+begin_src C++
+module M:C;
+import :A;
+B b1;                           // error: no reachable definition of struct B
+#+end_src
+
+#+REVEAL: split
+
+Primary Module Interface
+#+begin_src C++
+export module M;
+export import :A;
+import :B;
+B b2;
+export void f(B b = B());
+#+end_src
+
+#+REVEAL: split
+
+Plain Old Source
+#+begin_src C++
+import M;
+B b3;                           // error: no reachable definition of struct B
+void g() { f(); }               // error: no reachable definition of struct B
+#+end_src
 
 * Organizing your Module
 ** Dependency Cycles Are Forbidden
+This is explicit -- but also, how else would it work?
+
+Bloomberg Component rules (a.k.a. Lakosian rules) give us this already!
+** Forward Declaration
+You can't forward declare a type in a different module.
+
+Cycle breaking must be within modules.
+
+
 ** Single File Unit
+There is some support for the equivalent of a header only library.
+
+It may still need to produce an object file that you link.
+
+Your project may need to build it.
+
+
 ** Module Partitions
+
+Partitions must be acyclic, too.
+
+Useful for separating parts of a library internally.
+
 ** Implementation Partitions
-** `export import` : sub-modules
+An /Implementation Partition/
+ - Is very much like normal source files for a library.
+ - Can not contribute to interface.
+ - Has access to all declarations from the primary module interface.
+
+** ~export import~ : sub-modules
+You can re-export an entire module from your module.
+
+Units that ~import~ your module have access just as if they had themselves.
+
+Can partially hide the internal structure of a module.
 
 * Planning ahead
 ** Do you care about ABI or API?
-** What do you want to hide
-** `inline` means inline
+ABI stability means some source code reorganizations will change ABI. You can move between partitions, but not modules.
+
+Module attachment is not visible in the API.
+
+Bloomberg cares about API stability.
+
+We always rebuild and link consistently, so we are only affected by API changes.
+
+** ~inline~ means inline
+The ~inline~ keyword finally means something about inlining. Functions must be marked ~inline~ to have their bodies exported, although this is more complicated for template instantiations in importers.
+
 ** Module Attachment and Mangling
+#+begin_src C++
+module A:B;
+
+export struct foo {
+    int i_;
+    foo(int i) : i_(i) {
+    }
+};
+#+end_src
+
+#+begin_src asm
+foo@A::foo(int) [base object constructor]:        # @foo@A::foo(int) [base object constructor]
+        mov     dword ptr [rdi], esi
+        ret
+initializer for module A:B:                       # @initializer for module A:B
+        ret
+#+end_src
+
+#+REVEAL: split
+
+Mangled:
+#+begin_src asm
+_ZNW1A3fooC2Ei:                         # @_ZNW1A3fooC2Ei
+        movl    %esi, (%rdi)
+        retq
+_ZGIW1AWP1B:                            # @_ZGIW1AWP1B
+        retq
+#+end_src
 
 * Testing Modules
 ** Public Interface
+If you can test via the public interface, that is the most straightforward, and will probably make your clients happiest.
 ** Test Implementation Units
+It is possible to write implementation units that have access to the internals of a module; write tests there to link into your test driver.
 
+Module implementations are not closed, similar to namespace.
+
+It is not a security feature. But they can't change your interface.
+
+* Thank You!
+
+* Questions?
+
+* Thanks again!
 # Local Variables:
-# org-html-htmlize-output-type: inline-css
+# org-html-htmlize-output-type: css
 # End:

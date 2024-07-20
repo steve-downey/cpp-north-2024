@@ -1,0 +1,5 @@
+/.cache/
+/.update-submodules
+/cmake.bld/
+/compile_commands.json
+/papers/why-modules.html
